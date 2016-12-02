@@ -1,0 +1,11 @@
+init_config:
+    slow_client_threshold: 1.0
+    message_processor_activity_threshold: 20.0
+
+instances:
+    - name:  monolith
+      admin: localhost:2345
+
+    - name:  sample
+      admin: localhost:8085
+
