@@ -7,9 +7,14 @@ Here are the steps to install the AMPS AgentCheck for Datadog:
 
 1. Install the datadog agent on your AMPS host.
 
-2. Copy the amps.py AgentCheck to /etc/dd-agent/checks.d
+2. Copy the files from this github repo to your host:
 
-3. Create an amps.yaml configuration file in /etc/dd-agent/conf.d, containing a list of all instances and their admin ports. Example:
+```
+    amps.py   -> /etc/dd-agent/checks.d
+    amps.yaml -> /etc/dd-agent/conf.d
+```
+
+3. Edit the amps.yaml configuration file in /etc/dd-agent/conf.d to contain a list of AMPS instances on the host and their Admin ports. Example:
 
 ```
 init_config:
