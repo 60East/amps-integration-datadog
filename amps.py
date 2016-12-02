@@ -57,46 +57,46 @@ class AMPSCheck(AgentCheck):
             r = requests.get("http://%s/amps/instance.json" % admin, timeout=timeout)
             document = r.json()
 
-            self.gauge('amps.admin_reponse_time', time.time() - start_time)
+            self.gauge('amps.admin.reponse_time', time.time() - start_time)
 
             # Client load metrics
-            self.count('amps.clients', fetch(document, "amps", "instance", "clients", len))
-            self.count('amps.slow_clients', fetch(document, "amps", "instance", "clients", F("queue_max_latency",slow_client_threshold,operator.gt), len))
-            self.count('amps.subscriptions', fetch(document, "amps", "instance", "subscriptions", len))
-
-            # Entitlement denials
-            self.count('amps.denied_reads', fetch(document, "amps", "instance", "processors", F("id","all"), "denied_reads", int))
-            self.count('amps.denied_writes', fetch(document, "amps", "instance", "processors", F("id","all"), "denied_writes", int))
+            self.count('amps.clients.total', fetch(document, "amps", "instance", "clients", len))
+            self.count('amps.clients.slow', fetch(document, "amps", "instance", "clients", F("queue_max_latency",slow_client_threshold,operator.gt), len))
+            self.count('amps.subscriptions.total', fetch(document, "amps", "instance", "subscriptions", len))
 
             # Instance Memory
-            self.gauge('amps.vmsize', fetch(document, "amps", "instance", "memory", "vmsize", int))
-            self.gauge('amps.rss', fetch(document, "amps", "instance", "memory", "rss", int))
+            self.gauge('amps.memory.vmsize', fetch(document, "amps", "instance", "memory", "vmsize", int))
+            self.gauge('amps.memory.rss', fetch(document, "amps", "instance", "memory", "rss", int))
 
             # Event queues
-            self.count('amps.queued_queries', fetch(document, "amps", "instance", "queries", "queued_queries", int))
-            self.count('amps.view_queue_depth', fetch(document, "amps", "instance", "views", E("queue_depth"), M(int), sum))
-            self.count('amps.api_command_queue_depth', fetch(document, "amps", "instance", "api", "command_queue_depth", int))
+            self.count('amps.queries.queued', fetch(document, "amps", "instance", "queries", "queued_queries", int))
+            self.count('amps.views.queue_depth', fetch(document, "amps", "instance", "views", E("queue_depth"), M(int), sum))
+            self.count('amps.api.command_queue_depth', fetch(document, "amps", "instance", "api", "command_queue_depth", int))
 
             # Messaging Rates
-            self.gauge('amps.messages_received_per_sec', fetch(document, "amps", "instance", "processors", F("id","all"), "messages_received_per_sec", float))
-            self.gauge('amps.matches_found_per_sec', fetch(document, "amps", "instance", "processors", F("id","all"), "matches_found_per_sec", float))
+            self.gauge('amps.processing.messages_received_per_sec', fetch(document, "amps", "instance", "processors", F("id","all"), "messages_received_per_sec", float))
+            self.gauge('amps.processing.matches_found_per_sec', fetch(document, "amps", "instance", "processors", F("id","all"), "matches_found_per_sec", float))
+
+            # Entitlement denials
+            self.count('amps.processing.denied_reads', fetch(document, "amps", "instance", "processors", F("id","all"), "denied_reads", int))
+            self.count('amps.processing.denied_writes', fetch(document, "amps", "instance", "processors", F("id","all"), "denied_writes", int))
 
             # SOW Metrics
-            self.count('amps.sow_records', fetch(document, "amps", "instance", "sow", E("valid_keys"), M(int), sum))
-            self.count('amps.sow_deletes_per_sec', fetch(document, "amps", "instance", "sow", E("deletes_per_sec"), M(int), sum))
-            self.count('amps.sow_inserts_per_sec', fetch(document, "amps", "instance", "sow", E("inserts_per_sec"), M(int), sum))
-            self.count('amps.sow_updates_per_sec', fetch(document, "amps", "instance", "sow", E("updates_per_sec"), M(int), sum))
-            self.count('amps.sow_queries_per_sec', fetch(document, "amps", "instance", "sow", E("queries_per_sec"), M(int), sum))
-            self.count('amps.sow_query_count', fetch(document, "amps", "instance", "sow", E("query_count"), M(int), sum))
-            self.count('amps.sow_stored_bytes', fetch(document, "amps", "instance", "sow", E("stored_bytes"), M(int), sum))
-            self.count('amps.sow_memory_bytes', fetch(document, "amps", "instance", "sow", E("memory_bytes"), M(int), sum))
+            self.count('amps.sow.records', fetch(document, "amps", "instance", "sow", E("valid_keys"), M(int), sum))
+            self.count('amps.sow.deletes_per_sec', fetch(document, "amps", "instance", "sow", E("deletes_per_sec"), M(int), sum))
+            self.count('amps.sow.inserts_per_sec', fetch(document, "amps", "instance", "sow", E("inserts_per_sec"), M(int), sum))
+            self.count('amps.sow.updates_per_sec', fetch(document, "amps", "instance", "sow", E("updates_per_sec"), M(int), sum))
+            self.count('amps.sow.queries_per_sec', fetch(document, "amps", "instance", "sow", E("queries_per_sec"), M(int), sum))
+            self.count('amps.sow.query_count', fetch(document, "amps", "instance", "sow", E("query_count"), M(int), sum))
+            self.count('amps.sow.stored_bytes', fetch(document, "amps", "instance", "sow", E("stored_bytes"), M(int), sum))
+            self.count('amps.sow.memory_bytes', fetch(document, "amps", "instance", "sow", E("memory_bytes"), M(int), sum))
 
             # Check the health of the message processors
             processor_last_active = fetch(document, "amps", "instance", "processors", F("id","all"), "last_active", float)
             if processor_last_active > 1000.0*message_processor_activity_threshold:
-                self.service_check('amps.message_processor.check', AgentCheck.CRITICAL, timestamp=time.time())
+                self.service_check('amps.processing.check', AgentCheck.CRITICAL, timestamp=time.time())
             else:
-                self.service_check('amps.message_processor.check', AgentCheck.OK, timestamp=time.time())
+                self.service_check('amps.processing.check', AgentCheck.OK, timestamp=time.time())
 
         except requests.exceptions.Timeout as e:
             # If there's a timeout
