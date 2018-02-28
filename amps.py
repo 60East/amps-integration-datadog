@@ -60,8 +60,26 @@ class AMPSCheck(AgentCheck):
             self.gauge('amps.admin.reponse_time', time.time() - start_time)
 
             # Client load metrics
+            for client in fetch(document, "amps", "instance", "clients"):
+                tags = ["client:%s" % client["client_name"]]
+                self.count('amps.client.bytes_in_per_sec', float(client["bytes_in_per_sec"]), tags=tags)
+                self.count('amps.client.bytes_out_per_sec', float(client["bytes_out_per_sec"]), tags=tags)
+                self.count('amps.client.denied_writes', int(client["denied_writes"]), tags=tags)
+                self.count('amps.client.denied_reads', int(client["denied_reads"]), tags=tags)
+                self.count('amps.client.messages_in_per_sec', int(client["messages_in_per_sec"]), tags=tags)
+                self.count('amps.client.messages_out_per_sec', int(client["messages_out_per_sec"]), tags=tags)
+                self.count('amps.client.query_time', float(client["query_time"]), tags=tags)
+                self.count('amps.client.queue_depth_out', int(client["queue_depth_out"]), tags=tags)
+                self.count('amps.client.queue_max_latency', float(client["queue_max_latency"]), tags=tags)
+                self.count('amps.client.subscription_count', int(client["subscription_count"]), tags=tags)
+                self.count('amps.client.slow', float(client["queue_max_latency"])>slow_client_threshold, tags=tags)
+                # New metrics in 5.2
+                if client.has_key("transport_rx_queue"):
+                    self.count('amps.client.transport_rx_queue', int(client["transport_rx_queue"]), tags=tags)
+                    self.count('amps.client.transport_tx_queue', int(client["transport_tx_queue"]), tags=tags)
+
+
             self.count('amps.clients.total', fetch(document, "amps", "instance", "clients", len))
-            self.count('amps.clients.slow', fetch(document, "amps", "instance", "clients", F("queue_max_latency",slow_client_threshold,operator.gt), len))
             self.count('amps.subscriptions.total', fetch(document, "amps", "instance", "subscriptions", len))
 
             # Instance Memory
@@ -82,16 +100,37 @@ class AMPSCheck(AgentCheck):
             self.count('amps.processing.denied_writes', fetch(document, "amps", "instance", "processors", F("id","all"), "denied_writes", int))
 
             # SOW Metrics
-            self.count('amps.sow.records', fetch(document, "amps", "instance", "sow", E("valid_keys"), M(int), sum))
-            self.count('amps.sow.deletes_per_sec', fetch(document, "amps", "instance", "sow", E("deletes_per_sec"), M(int), sum))
-            self.count('amps.sow.inserts_per_sec', fetch(document, "amps", "instance", "sow", E("inserts_per_sec"), M(int), sum))
-            self.count('amps.sow.updates_per_sec', fetch(document, "amps", "instance", "sow", E("updates_per_sec"), M(int), sum))
-            self.count('amps.sow.queries_per_sec', fetch(document, "amps", "instance", "sow", E("queries_per_sec"), M(int), sum))
-            self.count('amps.sow.query_count', fetch(document, "amps", "instance", "sow", E("query_count"), M(int), sum))
-            self.count('amps.sow.stored_bytes', fetch(document, "amps", "instance", "sow", E("stored_bytes"), M(int), sum))
-            self.count('amps.sow.memory_bytes', fetch(document, "amps", "instance", "sow", E("memory_bytes"), M(int), sum))
+            for topic in fetch(document, "amps", "instance", "sow"):
+                tags = ["topic:%s" % topic["topic"]]
+                self.count('amps.sow.records', int(topic["valid_keys"]), tags=tags)
+                self.count('amps.sow.deletes_per_sec', int(topic["deletes_per_sec"]), tags=tags)
+                self.count('amps.sow.inserts_per_sec', int(topic["inserts_per_sec"]), tags=tags)
+                self.count('amps.sow.updates_per_sec', int(topic["updates_per_sec"]), tags=tags)
+                self.count('amps.sow.queries_per_sec', int(topic["queries_per_sec"]), tags=tags)
+                self.count('amps.sow.query_count', int(topic["query_count"]), tags=tags)
+                self.count('amps.sow.stored_bytes', int(topic["stored_bytes"]), tags=tags)
+                self.count('amps.sow.memory_bytes', int(topic["memory_bytes"]), tags=tags)
+
+            # Queue Metrics
+            for topic in fetch(document, "amps", "instance", "queues"):
+                tags = ["queue:%s" % topic["topic"]]
+                self.count('amps.queue.age_of_oldest_lease', float(topic["age_of_oldest_lease"]), tags=tags)
+                self.count('amps.queue.backlog', int(topic["backlog"]), tags=tags)
+                self.count('amps.queue.expired_leases', int(topic["expired_leases"]), tags=tags)
+                self.count('amps.queue.owned', int(topic["owned"]), tags=tags)
+                self.count('amps.queue.queue_depth', int(topic["queue_depth"]), tags=tags)
+                self.count('amps.queue.seconds_behind', float(topic["seconds_behind"]), tags=tags)
+                self.count('amps.queue.transferred_in', int(topic["transferred_in"]), tags=tags)
+                self.count('amps.queue.transferred_out', int(topic["transferred_out"]), tags=tags)
+
+            # View Metrics
+            for topic in fetch(document, "amps", "instance", "views"):
+                tags = ["view:%s" % topic["topic"]]
+                self.count('amps.view.conflation_ratio', float(topic["conflation_ratio"]), tags=tags)
+                self.count('amps.view.queue_depth', int(topic["conflation_ratio"]), tags=tags)
 
             # Check the health of the message processors
+            self.count('amps.processors.throttle_count', fetch(document, "amps", "instance", "processors", F("id","all"), "throttle_count", int))
             processor_last_active = fetch(document, "amps", "instance", "processors", F("id","all"), "last_active", float)
             if processor_last_active > 1000.0*message_processor_activity_threshold:
                 self.service_check('amps.processing.check', AgentCheck.CRITICAL, timestamp=time.time())
