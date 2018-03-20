@@ -1,6 +1,4 @@
 init_config:
-    slow_client_threshold: 1.0
-    message_processor_activity_threshold: 20.0
 
 instances:
     - name:  monolith

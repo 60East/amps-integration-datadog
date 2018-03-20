@@ -18,8 +18,6 @@ Here are the steps to install the AMPS AgentCheck for Datadog:
 
 ```
 init_config:
-    slow_client_threshold: 1.0
-    message_processor_activity_threshold: 20.0
 
 instances:
     - name:  monolith
@@ -31,4 +29,5 @@ instances:
 
 # Metric Descriptions
 
-Coming Soon!
+The metric names align with those found in the AMPS Monitoring Reference here:  http://www.crankuptheamps.com/documentation/
+
