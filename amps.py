@@ -32,7 +32,7 @@ class AMPSCheck(AgentCheck):
 
     def add_counts(self, stats_collection, prefix, property_type_pairs, tags):
         for property_name, type_func in property_type_pairs:
-            self.count(stats_collection, prefix, property_name, type_func, tags)
+            self.add_count(stats_collection, prefix, property_name, type_func, tags)
 
     def check(self, instance):
         if 'admin' not in instance:
@@ -56,7 +56,7 @@ class AMPSCheck(AgentCheck):
             r = requests.get("http://%s/amps/instance.json" % admin, timeout=timeout)
             document = r.json()
 
-            self.gauge('amps.admin.reponse_time', time.time() - start_time)
+            self.gauge('amps.admin.response_time', time.time() - start_time)
 
             # Client load metrics
             for client in fetch(document, "amps", "instance", "clients"):
