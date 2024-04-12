@@ -134,7 +134,7 @@ class AMPSCheck(AgentCheck):
             # Check the health of the message processors
             self.count('amps.processors.throttle_count', fetch(document, "amps", "instance", "processors", sub_select("id", "all"), "throttle_count", int), tags=instance_tags)
             processor_last_active = fetch(document, "amps", "instance", "processors", sub_select("id", "all"), "last_active", float)
-            self.guage('amps.processors.last_active', processor_last_active, tags=instance_tags) 
+            self.gauge('amps.processors.last_active', processor_last_active, tags=instance_tags)
 
         except requests.exceptions.Timeout as e:
             # If there's a timeout
