@@ -131,6 +131,18 @@ class AMPSCheck(AgentCheck):
                               ("queue_depth", int)]
                 self.add_counts(topic, 'amps.view', properties, tags)
 
+            # Replication Metrics
+            for destination in fetch(document, "amps", "instance", "replication"):
+                tags = instance_tags + ["destination_id:%s" % destination["id"],
+                                        "destination_name:%s" % destination["destination_name"],
+                                        "destination_group_name:%s" % destination["destination_group_name"]]
+                properties = [("bytes_out", int),
+                              ("bytes_out_per_sec", int),
+                              ("messages_out", int),
+                              ("messages_out_per_sec", int),
+                              ("seconds_behind", float)]
+                self.add_counts(destination, 'amps.replication', properties, tags)
+
             # Check the health of the message processors
             self.count('amps.processors.throttle_count', fetch(document, "amps", "instance", "processors", sub_select("id", "all"), "throttle_count", int), tags=instance_tags)
             processor_last_active = fetch(document, "amps", "instance", "processors", sub_select("id", "all"), "last_active", float)
