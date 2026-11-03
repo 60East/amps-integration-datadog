@@ -6,6 +6,9 @@ dependencies = []
 
 [tool.uv]
 package = false
+# datadog-checks-base[deps] pins 4.13.2; use the patched tracer for development.
+# Fixes GHSA-3633-r77q-h3v3 and GHSA-p3m5-h5v9-vqj6.
+override-dependencies = ["ddtrace==4.15.6"]
 
 [dependency-groups]
 dev = ["datadog-checks-base[deps]==38.5.0", "datadog-checks-dev==40.0.1", "pytest", "ruff"]
