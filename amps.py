@@ -1,160 +1,169 @@
-from checks import AgentCheck
-import requests
+"""AMPS monitoring check for Datadog Agent 7 and Python 3.13."""
+
+import math
 import time
-import functools
-import operator
+from urllib.parse import urlsplit
 
+from datadog_checks.base import AgentCheck, ConfigurationError
+from requests.exceptions import RequestException
 
-def filter_on(key, value, op, vector):
-    return filter(lambda k: op(k[key], value), vector)[0]
+__version__ = "2.0.0"
 
-
-def extractor(key, vector):
-    return map(lambda r: r[key], vector)
-
-
-def sub_select(key, value, op=operator.eq):
-    return functools.partial(filter_on, key, value, op)
-
-
-def fetch(document, *path):
-    try:
-        if len(path) > 0:
-            navigator = path[0]
-            if type(navigator) is str:
-                return fetch(document[navigator], *path[1:])
-            else:
-                return fetch(navigator(document), *path[1:])
-        else:
-            return document
-    except:
-        return None
+GROUPS = {
+    "client": [
+        "bytes_in_per_sec",
+        "bytes_out_per_sec",
+        "denied_writes",
+        "denied_reads",
+        "messages_in_per_sec",
+        "messages_out_per_sec",
+        "query_time",
+        "queue_depth_out",
+        "queue_max_latency",
+        "subscription_count",
+        "transport_rx_queue",
+        "transport_tx_queue",
+    ],
+    "sow": [
+        "valid_keys",
+        "deletes_per_sec",
+        "inserts_per_sec",
+        "updates_per_sec",
+        "queries_per_sec",
+        "query_count",
+        "stored_bytes",
+        "memory_bytes",
+    ],
+    "queue": [
+        "age_of_oldest_lease",
+        "backlog",
+        "expired_leases",
+        "owned",
+        "queue_depth",
+        "seconds_behind",
+        "transferred_in",
+        "transferred_out",
+    ],
+    "view": ["conflation_ratio", "queue_depth"],
+}
+COUNTERS = {
+    "denied_reads",
+    "denied_writes",
+    "query_time",
+    "query_count",
+    "expired_leases",
+    "transferred_in",
+    "transferred_out",
+    "throttle_count",
+}
 
 
 class AMPSCheck(AgentCheck):
-    def add_count(self, stats_collection, prefix, property_name, type_func, tags):
-        if stats_collection.has_key(property_name):
-            self.count("%s.%s" % (prefix, property_name), type_func(stats_collection[property_name]), tags=tags)
-
-    def add_counts(self, stats_collection, prefix, property_type_pairs, tags):
-        for property_name, type_func in property_type_pairs:
-            self.add_count(stats_collection, prefix, property_name, type_func, tags)
-
-    def check(self, instance):
-        if 'admin' not in instance:
-            self.log.info("Skipping instance, no admin found.")
-            return
-        if 'name' not in instance:
-            self.log.info("Defaulting name to admin location.")
-            instance['name'] = instance['admin']
-
-        # Load values from the instance config
-        admin = instance['admin']
-        instance_tags = instance.get('tags', [])
-        default_timeout = self.init_config.get('default_timeout', 5)
-        timeout = float(instance.get('timeout', default_timeout))
-
-        start_time = time.time()
+    def check(self, instance: dict) -> None:
+        name = instance.get("name")
+        url = instance.get("url", "")
+        if not isinstance(name, str) or not name.strip():
+            raise ConfigurationError("name must be a nonempty string")
         try:
-            r = requests.get("http://%s/amps/instance.json" % admin, timeout=timeout)
-            document = r.json()
+            parsed = urlsplit(url)
+            valid = isinstance(url, str) and parsed.scheme in {"http", "https"} and parsed.hostname and parsed.port != 0
+        except (ValueError, TypeError, AttributeError):
+            valid = False
+        if not valid or parsed.username or parsed.password or parsed.fragment:
+            raise ConfigurationError("url must be an HTTP(S) endpoint without embedded credentials or a fragment")
+        tags = instance.get("tags", [])
+        if not isinstance(tags, list) or any(not isinstance(t, str) for t in tags):
+            raise ConfigurationError("tags must be a list of strings")
+        collect_clients = instance.get("collect_client_metrics", False)
+        if not isinstance(collect_clients, bool):
+            raise ConfigurationError("collect_client_metrics must be a boolean")
+        try:
+            timeout = float(instance.get("timeout", 5))
+            if not math.isfinite(timeout) or timeout <= 0 or isinstance(instance.get("timeout"), bool):
+                raise ValueError
+        except (TypeError, ValueError, OverflowError):
+            raise ConfigurationError("timeout must be a positive finite number") from None
+        tags = [*tags, f"amps_instance:{name}"]
+        start = time.monotonic()
+        try:
+            response = self.http.get(url, timeout=timeout)
+            response.raise_for_status()
+            data = response.json()["amps"]["instance"]
+            if not isinstance(data, dict):
+                raise TypeError
+        except (RequestException, ValueError, KeyError, TypeError) as exc:
+            self.service_check(
+                "amps.admin.check", self.CRITICAL, tags=tags, message=f"AMPS collection failed ({type(exc).__name__})"
+            )
+            return
+        self.gauge("amps.admin.response_time", time.monotonic() - start, tags=tags)
+        malformed = False
 
-            self.gauge('amps.admin.response_time', time.time() - start_time)
+        def emit(source: dict, prefix: str, fields: list, metric_tags: list) -> None:
+            nonlocal malformed
+            for field in fields:
+                if field not in source:
+                    continue
+                try:
+                    value = source[field]
+                    if isinstance(value, bool):
+                        raise TypeError
+                    value = float(value)
+                    if not math.isfinite(value):
+                        raise ValueError
+                except (TypeError, ValueError, OverflowError):
+                    malformed = True
+                    continue
+                submit = self.monotonic_count if field in COUNTERS else self.gauge
+                metric_field = "queued" if prefix == "amps.queries" and field == "queued_queries" else field
+                submit(f"{prefix}.{metric_field}", value, tags=metric_tags)
 
-            # Client load metrics
-            for client in fetch(document, "amps", "instance", "clients"):
-                tags = instance_tags + ["client:%s" % client["client_name"]]
-                properties = [("bytes_in_per_sec", float),
-                              ("bytes_out_per_sec", float),
-                              ("denied_writes", int),
-                              ("denied_reads", int),
-                              ("messages_in_per_sec", int),
-                              ("messages_out_per_sec", int),
-                              ("query_time", float),
-                              ("query_depth_out", int),
-                              ("queue_max_latency", float),
-                              ("subscription_count", int),
-                              ("slow", float),
-                              ("transport_rx_queue", int),
-                              ("transport_tx_queue", int)]
-                self.add_counts(client, 'amps.client', properties, tags)
-
-            self.count('amps.clients.total', fetch(document, "amps", "instance", "clients", len), tags=instance_tags)
-            self.count('amps.subscriptions.total', fetch(document, "amps", "instance", "subscriptions", len), tags=instance_tags)
-
-            # Instance Memory
-            self.gauge('amps.memory.vmsize', fetch(document, "amps", "instance", "memory", "vmsize", int), tags=instance_tags)
-            self.gauge('amps.memory.rss', fetch(document, "amps", "instance", "memory", "rss", int), tags=instance_tags)
-
-            # Event queues
-            self.count('amps.queries.queued', fetch(document, "amps", "instance", "queries", "queued_queries", int), tags=instance_tags)
-            self.count('amps.api.command_queue_depth', fetch(document, "amps", "instance", "api", "command_queue_depth", int), tags=instance_tags)
-
-            # Messaging Rates
-            self.gauge('amps.processing.messages_received_per_sec', fetch(document, "amps", "instance", "processors", sub_select("id", "all"), "messages_received_per_sec", float), tags=instance_tags)
-            self.gauge('amps.processing.matches_found_per_sec', fetch(document, "amps", "instance", "processors", sub_select("id", "all"), "matches_found_per_sec", float), tags=instance_tags)
-
-            # Entitlement denials
-            self.count('amps.processing.denied_reads', fetch(document, "amps", "instance", "processors", sub_select("id", "all"), "denied_reads", int), tags=instance_tags)
-            self.count('amps.processing.denied_writes', fetch(document, "amps", "instance", "processors", sub_select("id", "all"), "denied_writes", int), tags=instance_tags)
-
-            # SOW Metrics
-            for topic in fetch(document, "amps", "instance", "sow"):
-                tags = instance_tags + ["topic:%s" % topic["topic"]]
-                properties = [("valid_keys", int),
-                              ("deletes_per_sec", int),
-                              ("inserts_per_sec", int),
-                              ("updates_per_sec", int),
-                              ("queries_per_sec", int),
-                              ("query_count", int),
-                              ("stored_bytes", int),
-                              ("memory_bytes", int)]
-                self.add_counts(topic, 'amps.sow', properties, tags)
-
-            # Queue Metrics
-            for topic in fetch(document, "amps", "instance", "queues"):
-                tags = instance_tags + ["queue:%s" % topic["topic"]]
-                properties = [("age_of_oldest_lease", float),
-                              ("backlog", int),
-                              ("expired_leases", int),
-                              ("owned", int),
-                              ("queue_depth", int),
-                              ("seconds_behind", float),
-                              ("transfered_in", int),
-                              ("transfered_out", int)]
-                self.add_counts(topic, 'amps.queue', properties, tags)
-
-            # View Metrics
-            for topic in fetch(document, "amps", "instance", "views"):
-                tags = instance_tags + ["view:%s" % topic["topic"]]
-                properties = [("conflation_ratio", float),
-                              ("queue_depth", int)]
-                self.add_counts(topic, 'amps.view', properties, tags)
-
-            # Check the health of the message processors
-            self.count('amps.processors.throttle_count', fetch(document, "amps", "instance", "processors", sub_select("id", "all"), "throttle_count", int), tags=instance_tags)
-            processor_last_active = fetch(document, "amps", "instance", "processors", sub_select("id", "all"), "last_active", float)
-            self.gauge('amps.processors.last_active', processor_last_active, tags=instance_tags)
-
-        except requests.exceptions.Timeout as e:
-            # If there's a timeout
-            msg = "Connection to AMPS admin timed out"
-            self.service_check('amps.admin.check', AgentCheck.WARNING, message=msg)
-        except requests.exceptions.ConnectionError, e:
-            # AMPS instance is down
-            msg = "Connection to AMPS transport refused. Service may not be running"
-            self.service_check('amps.admin.check', AgentCheck.CRITICAL, message=msg)
-        except Exception, e:
-            # AMPS instance is down?
-            msg = "Connection to AMPS transport refused. Service may not be running"
-            self.service_check('amps.admin.check', AgentCheck.CRITICAL, message=msg)
-
-
-if __name__ == '__main__':
-    check, instances = AMPSCheck.from_yaml('/etc/dd-agent/conf.d/amps.yaml')
-    for instance in instances:
-        print('\nRunning the check against AMPS @ {0}'.format(instance['admin']))
-        check.check(instance)
-        if check.has_events():
-            print('Events: {0}'.format(check.get_events()))
-        print('Metrics: {0}'.format(check.get_metrics()))
+        for section, fields in {
+            "memory": ["vmsize", "rss"],
+            "queries": ["queued_queries"],
+            "api": ["command_queue_depth"],
+        }.items():
+            source = data.get(section, {})
+            if isinstance(source, dict):
+                emit(source, f"amps.{section}", fields, tags)
+            else:
+                malformed = True
+        for section in ("clients", "subscriptions", "processors", "sow", "queues", "views"):
+            if section not in data:
+                continue
+            rows = data[section]
+            if not isinstance(rows, list):
+                malformed = True
+                continue
+            if section in {"clients", "subscriptions"}:
+                self.gauge(f"amps.{section}.total", len(rows), tags=tags)
+            if section == "subscriptions" or (section == "clients" and not collect_clients):
+                continue
+            for row in rows:
+                if not isinstance(row, dict):
+                    malformed = True
+                    continue
+                if section == "processors":
+                    if row.get("id") == "all":
+                        emit(
+                            row,
+                            "amps.processing",
+                            ["messages_received_per_sec", "matches_found_per_sec", "denied_reads", "denied_writes"],
+                            tags,
+                        )
+                        emit(row, "amps.processors", ["throttle_count", "last_active"], tags)
+                        break
+                    continue
+                group = {"clients": "client", "queues": "queue", "views": "view", "sow": "sow"}[section]
+                identity = row.get("client_name" if group == "client" else "topic")
+                if not isinstance(identity, str) or not identity:
+                    malformed = True
+                    continue
+                key = "topic" if group == "sow" else group
+                emit(row, f"amps.{group}", GROUPS[group], [*tags, f"{key}:{identity}"])
+        self.service_check(
+            "amps.admin.check",
+            self.WARNING if malformed else self.OK,
+            tags=tags,
+            message="Some AMPS metric data was malformed" if malformed else "",
+        )

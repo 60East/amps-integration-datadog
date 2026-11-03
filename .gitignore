@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
+.benchmarks/
+
+# Optional pytest coverage reports
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml

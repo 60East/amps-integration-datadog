@@ -1,9 +1,12 @@
-init_config:
-
+init_config: {}
 instances:
-    - name:  monolith
-      admin: localhost:2345
-
-    - name:  sample
-      admin: localhost:8085
-
+  - name: monolith
+    url: http://localhost:8085/amps/instance.json
+    timeout: 5
+    min_collection_interval: 15
+    collect_client_metrics: false
+    tags: []
+    # username: monitoring
+    # password: ENC[amps_password]
+    # tls_verify: true
+    # tls_ca_cert: /path/to/ca.pem
